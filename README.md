@@ -211,3 +211,107 @@ const newFileContent = await doTestUpload(fileInputDom);
         .body(new InputStreamResource(file.getInputStream()));
   }
 ```
+
+## logger utils
+```
+export const log = (...rest) => {
+  console.log('LOG: ', ...rest);
+};
+
+export const error = (...rest) => {
+  console.error('ERROR: ', ...rest);
+};
+
+export const warn = (...rest) => {
+  console.log('WARN: ', ...rest);
+};
+
+export const debug = (...rest) => {
+  console.debug('DEBUG: ', ...rest);
+};
+```
+
+
+## REST API and Fetch
+```
+
+/**
+ *
+ * @param {*} url url
+ * @param {*} params request params
+ * @param {*} postProcessingHandler function to be called after API returns (error / success), with params (res, url, params)
+ * this can return a promise postProcessingHandler(res, url, params)
+ */
+export const doAbortableFetch = (url, params, postProcessingHandler) => {
+  const controller = new AbortController();
+  const signal = controller.signal;
+
+  params = Object.assign(
+    {
+      headers: {
+        accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+      signal,
+    },
+    params,
+  );
+
+  const promiseFetch = fetch(url, params).then((res) => {
+    const newHeaders = {};
+    for (let [headerKey, headerValue] of res.headers) {
+      newHeaders[headerKey] = headerValue;
+    }
+    res.parsedHeaders = newHeaders;
+
+    if (res.ok) {
+      return res;
+    }
+
+    // dispatch logging out for forbidden status...
+    if (postProcessingHandler === undefined) {
+      switch (parseInt(res.status)) {
+        case 404: // not found
+          throw new Error(`Record not found (${url})`);
+        case 401: // (unauthorized) Log out , no retry
+          throw new Error(
+            `Unauthorized. Logging out. statusCode=${res.status} statusText=${res.statusText}`,
+          );
+        case 403: // (forbidden) Handle No permission to do something
+          throw new Error(`You do not have sufficient permission to access this Record (${url})`);
+        case 500: // (server errors)
+        case 502: // (gateway nginx errors)
+        default:
+          // other errors...
+          throw new Error(
+            `Server Error. Redirecting to ErrorPage. statusCode=${res.status} statusText=${res.statusText}`,
+          );
+      }
+    } else {
+      // else call the postProcessingHandler
+      return postProcessingHandler(res, url, params);
+    }
+  });
+
+  return [
+    promiseFetch,
+    () => {
+      // abort
+      controller.abort();
+    },
+  ];
+};
+
+/**
+ *
+ * @param {*} url url
+ * @param {*} params request params
+ * @param {*} postProcessingHandler function to be called after API returns (error / success), with params (res, url, params)
+ * this can return a promise postProcessingHandler(res, url, params)
+ */
+export const doFetch = (url, params, postProcessingHandler) => {
+  let [promiseFetchTicket] = doAbortableFetch(url, params, postProcessingHandler);
+  return promiseFetchTicket;
+};
+```
